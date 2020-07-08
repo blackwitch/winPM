@@ -1,11 +1,10 @@
-import os, sys , subprocess, _thread, signal
-import win32gui, win32api, win32con
+import os, sys , subprocess, _thread
+import win32gui, win32api, win32con, win32process
 import psutil
 import time
 import logging
 import json
 import time
-from pathlib import Path
 from datetime import datetime
 
 PMList = dict()  # process infomation list
@@ -163,10 +162,34 @@ def command_thread():
             print (" CTRL + C")
 ## command thread
 #############################################################
+def get_pid(process_name):
+    try:
+        processes = filter(lambda p: psutil.Process(p).name() == process_name, psutil.pids())
+        for pid in processes:
+            return pid
+        return 0
+    except Exception as e:
+        print ("GET_PID NOT FOUND ", process_name, e)
+        return 0
+
+def get_hwnd(pid):
+    def callback (hwnd, hwnds):
+        if win32gui.IsWindowVisible(hwnd) and win32gui.IsWindowEnabled(hwnd):
+            _,found_pid=win32process.GetWindowThreadProcessId(hwnd)
+            if found_pid==pid:
+                hwnds.append(hwnd)
+            return True
+    hwnds = []
+    win32gui.EnumWindows(callback, hwnds)
+    return hwnds[0] if hwnds else 0
+
+def get_hwnd_byName(process_name):
+    pid = get_pid(process_name)
+    return get_hwnd(pid) if pid else 0
 
 def stopProcess(task):
-    HWnd = win32gui.FindWindow(None, task["name"])
-    if HWnd != 0:
+    HWnd = get_hwnd_byName(task["proc_name"])
+    if HWnd > 0:
         try:
             if task["buttons"]["STOP"]:
                 btnHnd= win32gui.FindWindowEx(HWnd, 0 , "Button", task["buttons"]["STOP"])
@@ -187,7 +210,7 @@ def stopProcess(task):
         except:
             time.sleep(1)
 
-    HWnd = win32gui.FindWindow(None, task["name"])
+    HWnd = get_hwnd_byName(task["proc_name"])
     if HWnd != 0:
         os.system("taskkill /f /im "+task["proc_name"])
         time.sleep(1)
@@ -203,14 +226,15 @@ def stopProcess(task):
 
 def startProcess(task):
     # execute the app
-    HWnd = win32gui.FindWindow(None, task["name"])
+    HWnd = get_hwnd_byName(task["proc_name"])
     boolAlreadyStart = True
     if HWnd == 0:
         boolAlreadyStart = False
         os.chdir(os.path.realpath(task["app_path"]))
         myProcess = subprocess.Popen(task["app"])
         time.sleep(5)
-        HWnd = win32gui.FindWindow(None, task["name"])
+        HWnd = get_hwnd_byName(task["proc_name"])
+
     if HWnd == 0:
         print(task["name"], " is failed to execute.")
     else:
@@ -224,32 +248,23 @@ def startProcess(task):
                         print(task["buttons"]["START"], " button isn't there.")
             except:
                 time.sleep(1)
-            print(task["name"]," starts!")
             task["bStop"] = False
             task["status"] = "running"
             task["restart"] = int(task["restart"]) + 1
-            print( "RESTART ", task["restart"])
             print (" START [" + task["name"] + "]")
         else:
             print("[" + task["name"],"] is running already")
 
 if __name__ == "__main__":
     try:
-        def get_pid(process_name):
-            try:
-                processes = filter(lambda p: psutil.Process(p).name() == process_name, psutil.pids())
-                for pid in processes:
-                    return pid
-                return -1
-            except Exception as e:
-                print ("GET_PID NOT FOUND ", process_name, e)
-                return -1
-    
         def task_update():
             for key in PMList:
-                if PMList[key]["hwnd"] == None:
-                    PMList[key]["hwnd"] = win32gui.FindWindow(None,PMList[key]["name"])
+
                 PMList[key]["pid"] = get_pid(PMList[key]["proc_name"])
+                if PMList[key]["hwnd"] == None and PMList[key]["pid"] != 0:
+                    PMList[key]["hwnd"] = get_hwnd(PMList[key]["pid"])
+                else:
+                    PMList[key]["hwnd"] = None
 
                 if PMList[key]["pid"]> 0 and PMList[key]["bStop"] == False:
                     PMList[key]["status"] = psutil.Process(PMList[key]["pid"]).status()
@@ -279,8 +294,9 @@ if __name__ == "__main__":
             def sustenance_task():
                 if task["bStop"] == True:
                     return
-                HWnd = win32gui.FindWindow(None, task["name"])
-                if HWnd == 0:
+
+                pid = get_pid(task["proc_name"])
+                if pid == 0:
                     startProcess(task)
 
             def restart_task():
