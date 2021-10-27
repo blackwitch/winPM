@@ -31,8 +31,7 @@ class Event(object):
         self.args = args
         self.kwargs = kwargs
         self.use_thread = use_thread
-
-    #support: 
+    #support:
     # * 
     # 59
     # 10,20,30
@@ -90,7 +89,7 @@ class Cron(object):
             current = datetime(*datetime.now().timetuple()[:5])
             for e in self.events:
                 e.check(current)
-            time.sleep(0.001)
+            time.sleep(0.1)
 ## crontab-like codes
 #############################################################
 
@@ -231,7 +230,7 @@ def startProcess(task):
     if HWnd == 0:
         boolAlreadyStart = False
         os.chdir(os.path.realpath(task["app_path"]))
-        myProcess = subprocess.Popen(task["app"])
+        myProcess = subprocess.Popen(task["app"], task["args"])
         time.sleep(5)
         HWnd = get_hwnd_byName(task["proc_name"])
 
