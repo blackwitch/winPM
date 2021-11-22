@@ -7,14 +7,20 @@ import json
 import time
 from datetime import datetime
 
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler = logging.FileHandler('winpm.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 PMList = dict()  # process infomation list
 def getPMKey(cfg_task):
     try:
-        return hash(cfg_task["path"] + "/" + cfg_task["file"])
+        return hash(cfg_task["path"] + "/" + cfg_task["file"] + " " + cfg_task["name"])
     except Exception as e:
         print("ERROR : Incorrect \"config.json\" file! ERROR => ", e)
         sys.exit(0)
-
 
 #############################################################
 ## crontab-like code is from https://github.com/idning/pcl/blob/master/pcl/crontab.py 
@@ -56,12 +62,14 @@ class Event(object):
     def check(self, t):
         if self.matchtime(t):
             if self.use_thread:
+
                 thread.start_new_thread(self.func, self.args, self.kwargs)
             else:
                 try:
                     self.func(*self.args, **self.kwargs)
                 except Exception as e:
-                    logging.exception(e)
+                    print( "exception " + e )
+                    logger.exception(e)
 
 class Cron(object):
     def __init__(self):
@@ -78,12 +86,12 @@ class Cron(object):
             next_minute = t - t%60 + 60
             while t < next_minute:
                 sleeptime = 60 - t%60
-                logging.debug('current time: %s, we will sleep %.2f seconds' %(t, sleeptime))
                 time.sleep(sleeptime)
                 t = time.time()
 
             if last_run and next_minute - last_run != 60:
-                logging.warn('Cron Ignored: last_run: %s, this_time:%s' % (last_run, next_minute) )
+                print('Cron Ignored: last_run: %s, this_time:%s' % (last_run, next_minute) )
+                logger.warning('Cron Ignored: last_run: %s, this_time:%s' % (last_run, next_minute) )
             last_run = next_minute
 
             current = datetime(*datetime.now().timetuple()[:5])
@@ -152,7 +160,8 @@ def command_thread():
                     continue
                 for key in PMList:
                     if params[1] == PMList[key]["name"]:
-                        stopProcess(PMList[key])
+                        # stopProcess(PMList[key])
+                        logger.warning('RESTART : %s' % PMList[key])
                         print("Wait for a sec")
                         time.sleep(3)
                         startProcess(PMList[key])
@@ -222,15 +231,16 @@ def stopProcess(task):
     task["uptime"] = 0
     print (" STOP [" + task["name"] + "]")
 
-
 def startProcess(task):
     # execute the app
+    logger.debug('startProcess %s %s, date %s' % (task["proc_name"], task["args"], datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
     HWnd = get_hwnd_byName(task["proc_name"])
     boolAlreadyStart = True
     if HWnd == 0:
         boolAlreadyStart = False
         os.chdir(os.path.realpath(task["app_path"]))
-        myProcess = subprocess.Popen(task["app"], task["args"])
+        print(task["app"], task["args"])
+        myProcess = subprocess.Popen([task["app"], task["args"]])
         time.sleep(5)
         HWnd = get_hwnd_byName(task["proc_name"])
 
@@ -291,16 +301,18 @@ if __name__ == "__main__":
             myProcess = None
         
             def sustenance_task():
-                if task["bStop"] == True:
-                    return
+ #               if task["bStop"] == True:
+ #                   return
 
                 pid = get_pid(task["proc_name"])
                 if pid == 0:
                     startProcess(task)
 
             def restart_task():
-                if task["bStop"] == True:
-                    return
+                logger.debug('restart_task %s , date %s' % (task["proc_name"], datetime.now().strftime("%Y/%m/%d %H:%M:%S")))
+#                if task["bStop"] == True:
+#                    logger.debug('task bStop is TRUE')
+#                    return
                 stopProcess(task)
                 startProcess(task)
 
@@ -325,8 +337,8 @@ if __name__ == "__main__":
         for cfg_task in config['task']:
             key = getPMKey(cfg_task)
             app_path = cfg_task["path"]
-            app =cfg_task["path"] + "/" + cfg_task["file"]
-            PMList[key] = {"key" : key, "app_path" : app_path, "app":app, "proc_name":cfg_task["file"],"buttons":cfg_task["buttons"], "job":cfg_task["job"], "hwnd": None, "pid": None, "name": cfg_task["title"],"bStop": False, "status": "stop", "cpu_usage": -1, "mem_usage": -1, "uptime": -1, "restart": 0}
+            app =cfg_task["file"] # cfg_task["path"] + "/" + cfg_task["file"]
+            PMList[key] = {"key" : key, "app_path" : app_path, "app":app, "args": cfg_task["args"] , "proc_name":cfg_task["file"],"buttons":cfg_task["buttons"], "job":cfg_task["job"], "hwnd": None, "pid": None, "name": cfg_task["title"],"bStop": False, "status": "stop", "cpu_usage": -1, "mem_usage": -1, "uptime": -1, "restart": 0}
             runTask(PMList[key],cfg_task["schedule"]["cron"], cron)
         # add task for updating task status
         task_update()
